@@ -91,6 +91,11 @@ static string? ResolveServiceBaseUrl(string service, IConfiguration configuratio
 
 static string BuildTargetUri(string targetBase, string service, string? path, string? queryString)
 {
+    if (string.Equals(path, "health", StringComparison.OrdinalIgnoreCase))
+    {
+        return $"{targetBase.TrimEnd('/')}/health{queryString}";
+    }
+
     var normalizedPath = string.IsNullOrWhiteSpace(path) ? string.Empty : $"/{path}";
     return $"{targetBase.TrimEnd('/')}/api/{service}{normalizedPath}{queryString}";
 }
