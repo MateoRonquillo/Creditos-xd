@@ -141,3 +141,23 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+
+# .NET build output and local tooling
+**/bin/
+**/obj/
+*.user
+*.userosscache
+*.suo
+*.nupkg
+TestResults/
+BenchmarkDotNet.Artifacts/
+
+# Visual Studio and editor metadata
+.vs/
+.idea/
+*.DotSettings.user
+
+# Docker local overrides and persisted database data
+docker-compose.override.yml
+database/data/
+sqlserver-data/
