@@ -14,7 +14,7 @@ x-dotnet-service: &dotnet-service
 services:
   frontend:
     build:
-      context: ./frontend/simulador-creditos-web
+      context: ./frontend
       dockerfile: Dockerfile
       args:
         VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8080/api}

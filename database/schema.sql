@@ -1,0 +1,59 @@
+IF DB_ID(N'AuthDb') IS NULL CREATE DATABASE AuthDb;
+IF DB_ID(N'CreditDb') IS NULL CREATE DATABASE CreditDb;
+IF DB_ID(N'SimulationDb') IS NULL CREATE DATABASE SimulationDb;
+GO
+
+USE AuthDb;
+GO
+IF OBJECT_ID(N'Users', N'U') IS NULL
+CREATE TABLE Users (
+    Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    Name NVARCHAR(120) NOT NULL,
+    Email NVARCHAR(256) NOT NULL UNIQUE,
+    PasswordHash NVARCHAR(512) NOT NULL,
+    CreatedAtUtc DATETIME2 NOT NULL
+);
+GO
+
+USE CreditDb;
+GO
+IF OBJECT_ID(N'Credits', N'U') IS NULL
+CREATE TABLE Credits (
+    Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    UserId UNIQUEIDENTIFIER NOT NULL,
+    Name NVARCHAR(160) NOT NULL,
+    Amount DECIMAL(18, 2) NOT NULL,
+    AnnualInterestRate DECIMAL(9, 4) NOT NULL,
+    TermMonths INT NOT NULL,
+    AmortizationType NVARCHAR(20) NOT NULL,
+    CreatedAtUtc DATETIME2 NOT NULL
+);
+GO
+
+USE SimulationDb;
+GO
+IF OBJECT_ID(N'Simulations', N'U') IS NULL
+CREATE TABLE Simulations (
+    Id UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+    UserId UNIQUEIDENTIFIER NOT NULL,
+    CreditId UNIQUEIDENTIFIER NULL,
+    Amount DECIMAL(18, 2) NOT NULL,
+    AnnualInterestRate DECIMAL(9, 4) NOT NULL,
+    TermMonths INT NOT NULL,
+    AmortizationType NVARCHAR(20) NOT NULL,
+    TotalInterest DECIMAL(18, 2) NOT NULL,
+    TotalPayment DECIMAL(18, 2) NOT NULL,
+    CreatedAtUtc DATETIME2 NOT NULL
+);
+
+IF OBJECT_ID(N'AmortizationInstallments', N'U') IS NULL
+CREATE TABLE AmortizationInstallments (
+    Id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+    SimulationId UNIQUEIDENTIFIER NOT NULL,
+    Period INT NOT NULL,
+    Payment DECIMAL(18, 2) NOT NULL,
+    Principal DECIMAL(18, 2) NOT NULL,
+    Interest DECIMAL(18, 2) NOT NULL,
+    Balance DECIMAL(18, 2) NOT NULL
+);
+GO

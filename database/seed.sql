@@ -1,0 +1,2 @@
+-- Datos de ejemplo reservados para cuando se conecte persistencia SQL real.
+-- La implementacion actual usa repositorios en memoria para facilitar el arranque con Docker.
