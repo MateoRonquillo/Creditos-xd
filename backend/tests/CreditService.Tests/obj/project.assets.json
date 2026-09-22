@@ -1,5 +1,5 @@
 {
-  "version": 4,
+  "version": 3,
   "targets": {
     "net10.0": {
       "CreditService/1.0.0": {
@@ -30,30 +30,32 @@
     ]
   },
   "packageFolders": {
-    "C:\\Users\\Mateo Ronquillo\\.nuget\\packages\\": {}
+    "C:\\Users\\Jean\\.nuget\\packages\\": {}
   },
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\Mateo Ronquillo\\Documents\\Creditos-xd\\backend\\tests\\CreditService.Tests\\CreditService.Tests.csproj",
+      "projectUniqueName": "C:\\Users\\Jean\\Desktop\\ProyectoAgiles\\Creditos-xd\\backend\\tests\\CreditService.Tests\\CreditService.Tests.csproj",
       "projectName": "CreditService.Tests",
-      "projectPath": "C:\\Users\\Mateo Ronquillo\\Documents\\Creditos-xd\\backend\\tests\\CreditService.Tests\\CreditService.Tests.csproj",
-      "packagesPath": "C:\\Users\\Mateo Ronquillo\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\Mateo Ronquillo\\Documents\\Creditos-xd\\backend\\tests\\CreditService.Tests\\obj\\",
+      "projectPath": "C:\\Users\\Jean\\Desktop\\ProyectoAgiles\\Creditos-xd\\backend\\tests\\CreditService.Tests\\CreditService.Tests.csproj",
+      "packagesPath": "C:\\Users\\Jean\\.nuget\\packages\\",
+      "outputPath": "C:\\Users\\Jean\\Desktop\\ProyectoAgiles\\Creditos-xd\\backend\\tests\\CreditService.Tests\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
-        "C:\\Users\\Mateo Ronquillo\\AppData\\Roaming\\NuGet\\NuGet.Config"
+        "C:\\Users\\Jean\\AppData\\Roaming\\NuGet\\NuGet.Config"
       ],
       "originalTargetFrameworks": [
         "net10.0"
       ],
+      "sources": {
+        "https://api.nuget.org/v3/index.json": {}
+      },
       "frameworks": {
         "net10.0": {
-          "framework": "net10.0",
           "targetAlias": "net10.0",
           "projectReferences": {
-            "C:\\Users\\Mateo Ronquillo\\Documents\\Creditos-xd\\backend\\CreditService\\CreditService.csproj": {
-              "projectPath": "C:\\Users\\Mateo Ronquillo\\Documents\\Creditos-xd\\backend\\CreditService\\CreditService.csproj"
+            "C:\\Users\\Jean\\Desktop\\ProyectoAgiles\\Creditos-xd\\backend\\CreditService\\CreditService.csproj": {
+              "projectPath": "C:\\Users\\Jean\\Desktop\\ProyectoAgiles\\Creditos-xd\\backend\\CreditService\\CreditService.csproj"
             }
           }
         }
@@ -68,11 +70,10 @@
         "auditLevel": "low",
         "auditMode": "all"
       },
-      "SdkAnalysisLevel": "10.0.400"
+      "SdkAnalysisLevel": "10.0.200"
     },
     "frameworks": {
       "net10.0": {
-        "framework": "net10.0",
         "targetAlias": "net10.0",
         "imports": [
           "net461",
@@ -90,7 +91,7 @@
             "privateAssets": "all"
           }
         },
-        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.401/PortableRuntimeIdentifierGraph.json",
+        "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.203/PortableRuntimeIdentifierGraph.json",
         "packagesToPrune": {
           "Microsoft.CSharp": "(,4.7.32767]",
           "Microsoft.VisualBasic": "(,10.4.32767]",
