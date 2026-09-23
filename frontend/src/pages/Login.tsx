@@ -1,99 +1,198 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { request } from '../api';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { getApiMessage, hasSession, request, saveSession, type AuthResponse } from '../api';
+
+type AuthMode = 'login' | 'register';
+
+type LocationState = {
+  from?: { pathname?: string };
+  registeredEmail?: string;
+};
 
 export default function Login() {
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  const navigate = useNavigate();
+  const initialMode: AuthMode = location.pathname === '/register' ? 'register' : 'login';
+  const locationState = location.state as LocationState | null;
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState(locationState?.registeredEmail ?? '');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
-  const [mensajeAyuda, setMensajeAyuda] = useState(''); 
-  const navigate = useNavigate();
+  const [message, setMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const manejarAccion = async (e: React.FormEvent, esRegistro: boolean) => {
-    e.preventDefault();
-    if (!email.includes('@') || !email.includes('.')) { setError('Ingresa un correo electrónico válido.'); return; }
-    if (password.length < 5) { setError('La contraseña debe tener al menos 5 caracteres.'); return; }
-    
+  const mode = initialMode;
+  const isRegister = mode === 'register';
+  const title = isRegister ? 'Crear cuenta' : 'Iniciar sesion';
+  const subtitle = isRegister
+    ? 'Registra tus datos para guardar simulaciones y descargarlas cuando lo necesites.'
+    : 'Accede con una cuenta existente para continuar con tus simulaciones guardadas.';
+
+  const nextRoute = useMemo(() => {
+    if (locationState?.from?.pathname) return locationState.from.pathname;
+    return '/dashboard';
+  }, [locationState?.from?.pathname]);
+
+  useEffect(() => {
+    if (hasSession()) {
+      navigate('/dashboard', { replace: true });
+    }
+  }, [navigate]);
+
+  const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const validationError = validateForm(mode, { name, email, password });
+    if (validationError) {
+      setError(validationError);
+      setMessage('');
+      return;
+    }
+
+    setIsSubmitting(true);
     setError('');
-    setMensajeAyuda('Conectando con el servidor...');
+    setMessage(isRegister ? 'Creando tu cuenta...' : 'Validando tus credenciales...');
 
     try {
-      const endpoint = esRegistro ? '/auth/register' : '/auth/login';
-      const payload = esRegistro ? { name: 'Marlon', email, password } : { email, password };
-      const result = await request(endpoint, { method: 'POST', body: JSON.stringify(payload) });
+      if (isRegister) {
+        const result = await request<AuthResponse>('/auth/register', {
+          method: 'POST',
+          body: JSON.stringify({ name: name.trim(), email: email.trim(), password }),
+        });
 
-      if (result.response.ok) {
-        if (esRegistro) {
-          setMensajeAyuda('¡Registro exitoso! Ahora presiona "Ingresar".');
-        } else {
-          localStorage.setItem('token', result.body.token);
-          navigate('/dashboard');
+        if (!result.response.ok) {
+          throw new Error(getApiMessage(result.body, 'No pudimos crear la cuenta. Revisa los datos e intenta nuevamente.'));
         }
-      } else {
-        setError(esRegistro ? 'El usuario ya existe.' : 'Credenciales incorrectas.');
-        setMensajeAyuda('');
+
+        setPassword('');
+        setMessage('Cuenta creada correctamente. Ahora inicia sesion con tus credenciales.');
+        navigate('/login', { replace: true, state: { registeredEmail: email.trim() } });
+        return;
       }
-    } catch (err) {
-      setError('Error de red al conectar con los microservicios.');
-      setMensajeAyuda('');
+
+      const result = await request<AuthResponse>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email: email.trim(), password }),
+      });
+
+      if (!result.response.ok || !isAuthResponse(result.body)) {
+        throw new Error(getApiMessage(result.body, 'Correo o contrasena incorrectos.'));
+      }
+
+      saveSession(result.body);
+      navigate(nextRoute, { replace: true });
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'No se pudo completar la solicitud.');
+      setMessage('');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
+  const switchMode = () => {
+    setError('');
+    setMessage('');
+    navigate(isRegister ? '/login' : '/register');
+  };
+
   return (
-    <main style={{ display: 'flex', minHeight: '100vh', backgroundColor: '#fff', fontFamily: 'system-ui, sans-serif' }}>
-      
-      {/* PANEL IZQUIERDO: Imagen Institucional */}
-      <section style={{ 
-        flex: 1, 
-        display: 'flex', 
-        backgroundImage: 'linear-gradient(to right, rgba(30, 58, 138, 0.8), rgba(30, 58, 138, 0.4)), url("https://images.unsplash.com/photo-1601597111158-2fceff292cdc?q=80&w=2070&auto=format&fit=crop")',
-        backgroundSize: 'cover', 
-        backgroundPosition: 'center',
-        padding: '4rem',
-        color: '#fff',
-        flexDirection: 'column',
-        justifyContent: 'center'
-      }}>
-        <div style={{ maxWidth: '500px' }}>
-          <h1 style={{ fontSize: '3.5rem', fontWeight: 'bold', marginBottom: '1rem', lineHeight: 1.1 }}>
-            Construye tu futuro financiero
-          </h1>
-          <p style={{ fontSize: '1.25rem', opacity: 0.9 }}>
-            Simulador de créditos con arquitectura de microservicios. Rápido, seguro y en tiempo real.
+    <main className="auth-page">
+      <section className="auth-visual" aria-label="Simulador de credito">
+        <div className="auth-visual-content">
+          <span className="eyebrow">Banca digital</span>
+          <h1>Simula, compara y decide con claridad.</h1>
+          <p>
+            Calcula cuotas referenciales de credito y guarda tu historial cuando tengas una cuenta activa.
           </p>
         </div>
       </section>
 
-      {/* PANEL DERECHO: Formulario */}
-      <section style={{ width: '100%', maxWidth: '500px', padding: '4rem 3rem', display: 'flex', flexDirection: 'column', justifyContent: 'center', backgroundColor: '#fff' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '2rem' }}>
-          <span style={{ fontSize: '2rem' }}>🏦</span>
-          <h2 style={{ color: '#1e3a8a', fontSize: '1.8rem', fontWeight: 'bold', margin: 0 }}>Banco Estudiantil</h2>
-        </div>
-        
-        <h3 style={{ fontSize: '1.25rem', color: '#374151', marginBottom: '1.5rem', fontWeight: '600' }}>Acceso al Sistema</h3>
-        
-        {error && <p style={{ color: '#ef4444', marginBottom: '15px', fontSize: '0.9rem', fontWeight: 'bold', backgroundColor: '#fef2f2', padding: '10px', borderRadius: '5px' }}>{error}</p>}
-        {mensajeAyuda && <p style={{ color: '#10b981', marginBottom: '15px', fontSize: '0.9rem', fontWeight: 'bold', backgroundColor: '#ecfdf5', padding: '10px', borderRadius: '5px' }}>{mensajeAyuda}</p>}
+      <section className="auth-panel">
+        <Link to="/dashboard" className="auth-brand">
+          <span className="brand-mark">BE</span>
+          <span>Banco Estudiantil</span>
+        </Link>
 
-        <form style={{ display: 'flex', flexDirection: 'column', gap: '1.2rem' }}>
-          <div>
-            <label style={{ display: 'block', color: '#4b5563', fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem' }}>Usuario / Correo</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required style={{ width: '100%', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #d1d5db', boxSizing: 'border-box', outline: 'none', fontSize: '1rem' }} placeholder="tu@correo.com" />
-          </div>
-          <div>
-            <label style={{ display: 'block', color: '#4b5563', fontSize: '0.875rem', fontWeight: '600', marginBottom: '0.5rem' }}>Contraseña</label>
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required style={{ width: '100%', padding: '1rem', borderRadius: '0.5rem', border: '1px solid #d1d5db', boxSizing: 'border-box', outline: 'none', fontSize: '1rem' }} placeholder="••••••••" />
-          </div>
-          
-          <button type="submit" onClick={(e) => manejarAccion(e, false)} style={{ width: '100%', backgroundColor: '#1e3a8a', color: '#fff', fontWeight: 'bold', padding: '1rem', borderRadius: '0.5rem', border: 'none', cursor: 'pointer', fontSize: '1rem', marginTop: '10px', transition: 'background 0.2s' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#172554'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#1e3a8a'}>
-            Iniciar Sesión
-          </button>
-          <button type="button" onClick={(e) => manejarAccion(e, true)} style={{ width: '100%', backgroundColor: '#f3f4f6', color: '#4b5563', fontWeight: '600', padding: '0.75rem', borderRadius: '0.5rem', border: 'none', cursor: 'pointer', fontSize: '0.875rem', transition: 'background 0.2s' }} onMouseOver={(e) => e.currentTarget.style.backgroundColor = '#e5e7eb'} onMouseOut={(e) => e.currentTarget.style.backgroundColor = '#f3f4f6'}>
-            Crear cuenta de prueba
+        <div className="auth-copy">
+          <span className="eyebrow">{isRegister ? 'Registro seguro' : 'Acceso seguro'}</span>
+          <h2>{title}</h2>
+          <p>{subtitle}</p>
+        </div>
+
+        {error && <div className="alert alert-error">{error}</div>}
+        {message && <div className="alert alert-success">{message}</div>}
+
+        <form className="auth-form" onSubmit={handleSubmit}>
+          {isRegister && (
+            <label>
+              <span>Nombre completo</span>
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder="Tu nombre"
+                autoComplete="name"
+              />
+            </label>
+          )}
+
+          <label>
+            <span>Correo electronico</span>
+            <input
+              type="email"
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="tu@correo.com"
+              autoComplete="email"
+            />
+          </label>
+
+          <label>
+            <span>Contrasena</span>
+            <input
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              placeholder="Minimo 6 caracteres"
+              autoComplete={isRegister ? 'new-password' : 'current-password'}
+            />
+          </label>
+
+          <button className="btn btn-primary btn-full" type="submit" disabled={isSubmitting}>
+            {isSubmitting ? 'Procesando...' : title}
           </button>
         </form>
+
+        <button className="auth-switch" type="button" onClick={switchMode}>
+          {isRegister ? 'Ya tengo cuenta, iniciar sesion' : 'No tengo cuenta, crear una'}
+        </button>
       </section>
     </main>
+  );
+}
+
+function validateForm(mode: AuthMode, values: { name: string; email: string; password: string }) {
+  if (mode === 'register' && values.name.trim().length < 2) {
+    return 'Ingresa tu nombre para crear la cuenta.';
+  }
+
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email.trim())) {
+    return 'Ingresa un correo electronico valido.';
+  }
+
+  if (values.password.length < 6) {
+    return 'La contrasena debe tener al menos 6 caracteres.';
+  }
+
+  return '';
+}
+
+function isAuthResponse(body: unknown): body is AuthResponse {
+  return Boolean(
+    body
+    && typeof body === 'object'
+    && 'token' in body
+    && typeof (body as { token?: unknown }).token === 'string'
+    && 'user' in body
+    && typeof (body as { user?: unknown }).user === 'object',
   );
 }

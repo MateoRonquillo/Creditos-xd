@@ -1,299 +1,377 @@
-import React, { useState } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
-import { request } from '../api';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
-import '../App.css'; 
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { Link, useLocation } from 'react-router-dom';
+import {
+  getApiMessage,
+  hasSession,
+  request,
+  subscribeToSessionChanges,
+  type CreditDto,
+  type SimulationDto,
+} from '../api';
+import { CREDIT_OPTIONS, type CreditOption } from '../credits';
+import { exportSimulationPdf, formatMethod, formatMoney, type PdfInstallment } from '../pdf';
+
+type LocationState = {
+  creditoSeleccionado?: CreditOption;
+};
+
+type SimulationResult = {
+  firstPayment: number;
+  firstPrincipal: number;
+  firstInterest: number;
+  insuranceMonthly: number;
+  amount: number;
+  totalInterest: number;
+  totalInsurance: number;
+  totalPayment: number;
+  termMonths: number;
+  schedule: PdfInstallment[];
+  savedSimulationId?: string;
+};
+
+const INSURANCE_MONTHLY = 4.5;
 
 export default function Simulador() {
   const location = useLocation();
-  const navigate = useNavigate();
-  const creditoSeleccionado = location.state?.creditoSeleccionado;
+  const state = location.state as LocationState | null;
+  const initialCredit = state?.creditoSeleccionado ?? CREDIT_OPTIONS[0];
 
-  if (!creditoSeleccionado) {
-    navigate('/dashboard');
-    return null;
-  }
-
-  const [monto, setMonto] = useState('5000');
-  const [plazo, setPlazo] = useState('24'); 
-  const [metodo, setMetodo] = useState('german'); // Ajustado a Alemán para tu prueba
+  const [selectedCreditId, setSelectedCreditId] = useState(initialCredit.id);
+  const [amount, setAmount] = useState('5000');
+  const [term, setTerm] = useState('24');
+  const [method, setMethod] = useState<'french' | 'german'>('german');
   const [error, setError] = useState('');
-  const [cargando, setCargando] = useState(false);
-  const [resultados, setResultados] = useState<any>(null);
+  const [notice, setNotice] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(hasSession);
+  const [result, setResult] = useState<SimulationResult | null>(null);
 
-  // FÓRMULAS MATEMÁTICAS EN EL FRONTEND
-  const calcularTabla = (montoTotal: number, tasaAnual: number, meses: number, tipo: string) => {
-    let saldo = montoTotal;
-    const tasaMensual = (tasaAnual / 100) / 12;
-    const cuotas = [];
-    let totalInteres = 0;
+  const selectedCredit = useMemo(
+    () => CREDIT_OPTIONS.find((credit) => credit.id === selectedCreditId) ?? CREDIT_OPTIONS[0],
+    [selectedCreditId],
+  );
 
-    if (tipo === 'french') {
-      // Método Francés: Cuota Fija
-      const cuotaFija = montoTotal * (tasaMensual * Math.pow(1 + tasaMensual, meses)) / (Math.pow(1 + tasaMensual, meses) - 1);
-      for (let i = 1; i <= meses; i++) {
-        const interes = saldo * tasaMensual;
-        const capital = cuotaFija - interes;
-        saldo -= capital;
-        totalInteres += interes;
-        cuotas.push({ mes: i, cuota: cuotaFija, capital, interes, saldo: Math.max(0, saldo) });
-      }
-    } else {
-      // Método Alemán: Amortización de Capital Fija (Tu caso de prueba)
-      const capitalFijo = montoTotal / meses;
-      for (let i = 1; i <= meses; i++) {
-        const interes = saldo * tasaMensual;
-        const cuota = capitalFijo + interes;
-        saldo -= capitalFijo;
-        totalInteres += interes;
-        cuotas.push({ mes: i, cuota, capital: capitalFijo, interes, saldo: Math.max(0, saldo) });
-      }
-    }
-    return { cuotas, totalInteres };
-  };
+  useEffect(() => subscribeToSessionChanges(() => setIsAuthenticated(hasSession())), []);
 
-  const manejarSimulacion = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSimulation = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setError('');
-    
-    const montoNum = Number(monto);
-    if (montoNum < 300) {
-      setError('El monto mínimo a solicitar es de $300.00');
+    setNotice('');
+
+    const amountValue = Number(amount);
+    const termValue = Number(term);
+
+    if (!Number.isFinite(amountValue) || amountValue < 300) {
+      setError('El monto minimo a solicitar es de $300.00.');
       return;
     }
 
-    setCargando(true);
+    if (!Number.isFinite(termValue) || termValue < 1) {
+      setError('Selecciona un plazo valido para la simulacion.');
+      return;
+    }
+
+    const localResult = buildSimulationResult(amountValue, selectedCredit.interes, termValue, method);
+    setResult(localResult);
+
+    if (!isAuthenticated) {
+      setNotice('Calculo referencial listo. Inicia sesion para guardar y exportar tu simulacion.');
+      return;
+    }
+
+    setIsLoading(true);
 
     try {
-      // 1. Calculamos todo localmente para que la interfaz nunca falle
-      const calculos = calcularTabla(montoNum, creditoSeleccionado.interes, Number(plazo), metodo);
-      const cuotaInicial = calculos.cuotas[0]; // Tomamos la cuota del mes 1
-      const seguroFijoMensual = 4.50; // Valor de seguro referencial
-
-      setResultados({
-        cuotaMensual: cuotaInicial.cuota + seguroFijoMensual,
-        capitalMes: cuotaInicial.capital,
-        interesMes: cuotaInicial.interes,
-        seguroMes: seguroFijoMensual,
-        capitalTotal: montoNum,
-        interesTotal: calculos.totalInteres,
-        seguroTotal: seguroFijoMensual * Number(plazo),
-        plazoMeses: Number(plazo),
-        tablaCompleta: calculos.cuotas // Guardamos la tabla para el PDF
-      });
-
-      // 2. Notificamos al backend de Mateo silenciosamente
-      const resCredito = await request('/credits', {
+      const creditResult = await request<CreditDto>('/credits', {
         method: 'POST',
         body: JSON.stringify({
-          name: creditoSeleccionado.nombre,
-          amount: montoNum,
-          annualInterestRate: creditoSeleccionado.interes,
-          termMonths: Number(plazo),
-          amortizationType: metodo
-        })
+          name: selectedCredit.nombre,
+          amount: amountValue,
+          annualInterestRate: selectedCredit.interes,
+          termMonths: termValue,
+          amortizationType: method,
+        }),
       });
-      if (resCredito.response.ok) {
-        await request('/simulations', {
-          method: 'POST',
-          body: JSON.stringify({
-            creditId: resCredito.body.id,
-            amount: montoNum,
-            annualInterestRate: creditoSeleccionado.interes,
-            termMonths: Number(plazo),
-            amortizationType: metodo
-          })
-        });
+
+      if (!creditResult.response.ok || !isCreditDto(creditResult.body)) {
+        throw new Error(getApiMessage(creditResult.body, 'No pudimos guardar el credito.'));
       }
-    } catch (err) {
-      // Si el backend falla, la UI seguirá funcionando porque ya calculamos los datos localmente
-      console.warn("No se pudo guardar en el backend, pero el cálculo local fue exitoso.");
+
+      const simulationResult = await request<SimulationDto>('/simulations', {
+        method: 'POST',
+        body: JSON.stringify({
+          creditId: creditResult.body.id,
+          amount: amountValue,
+          annualInterestRate: selectedCredit.interes,
+          termMonths: termValue,
+          amortizationType: method,
+        }),
+      });
+
+      if (!simulationResult.response.ok || !isSimulationDto(simulationResult.body)) {
+        throw new Error(getApiMessage(simulationResult.body, 'No pudimos guardar la simulacion.'));
+      }
+
+      setResult({
+        ...localResult,
+        savedSimulationId: simulationResult.body.id,
+      });
+      setNotice('Simulacion guardada correctamente en tu historial.');
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : 'El calculo fue exitoso, pero no se pudo guardar.');
     } finally {
-      setCargando(false);
+      setIsLoading(false);
     }
   };
 
-  const descargarPDF = () => {
-    if (!resultados || !resultados.tablaCompleta) return;
-    
-    const doc = new jsPDF();
-    doc.setFontSize(18);
-    doc.setTextColor(15, 38, 92);
-    doc.text(`Tabla de Amortización - ${creditoSeleccionado.nombre}`, 14, 22);
+  const downloadPdf = () => {
+    if (!result) return;
 
-    doc.setFontSize(11);
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Monto Solicitado: $${resultados.capitalTotal.toFixed(2)}`, 14, 32);
-    doc.text(`Tasa de Interés Anual: ${creditoSeleccionado.interes}%`, 14, 38);
-    doc.text(`Plazo: ${resultados.plazoMeses} meses`, 14, 44);
-    doc.text(`Método: ${metodo === 'french' ? 'Francés (Cuota Fija)' : 'Alemán (Cuota Variable)'}`, 14, 50);
-
-    const tableColumn = ["Mes", "Cuota a Pagar", "Abono al Capital", "Interés", "Saldo Restante"];
-    
-    // Construimos las filas del PDF usando la tabla que calculamos localmente
-    const tableRows = resultados.tablaCompleta.map((c: any) => [
-      c.mes,
-      `$${(c.cuota + resultados.seguroMes).toFixed(2)}`,
-      `$${c.capital.toFixed(2)}`,
-      `$${c.interes.toFixed(2)}`,
-      `$${c.saldo.toFixed(2)}`
-    ]);
-
-    autoTable(doc, {
-      head: [tableColumn],
-      body: tableRows,
-      startY: 58,
-      theme: 'striped',
-      headStyles: { fillColor: [15, 38, 92] },
+    exportSimulationPdf({
+      title: 'Tabla de amortizacion',
+      fileName: `simulacion_${selectedCredit.nombre}_${result.savedSimulationId ?? 'local'}`,
+      productName: selectedCredit.nombre,
+      amount: result.amount,
+      annualInterestRate: selectedCredit.interes,
+      termMonths: result.termMonths,
+      amortizationType: method,
+      totalInterest: result.totalInterest,
+      totalPayment: result.totalPayment,
+      schedule: result.schedule,
+      insuranceMonthly: result.insuranceMonthly,
     });
-
-    doc.save(`Amortizacion_${creditoSeleccionado.nombre.replace(/ /g, '_')}.pdf`);
   };
 
   return (
-    <main style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto', fontFamily: 'system-ui, sans-serif' }}>
-      <header style={{ backgroundColor: '#fff', borderBottom: '4px solid #facc15', padding: '1rem 2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', boxShadow: '0 1px 2px rgba(0,0,0,0.05)', marginBottom: '30px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span style={{ fontSize: '1.5rem', color: '#1e3a8a' }}>🏦</span>
-          <h1 style={{ color: '#1e3a8a', fontSize: '1.25rem', fontWeight: 'bold', margin: 0 }}>Banco Estudiantil</h1>
+    <main className="page simulator-page">
+      <section className="simulator-hero">
+        <div>
+          <span className="eyebrow">Simula tu credito</span>
+          <h1>Calcula cuotas referenciales al instante.</h1>
+          <p>
+            Puedes simular sin iniciar sesion. Para guardar tu historial y exportar el PDF necesitas una cuenta.
+          </p>
         </div>
-        
-        <div style={{ fontSize: '0.9rem', color: '#4b5563', fontWeight: '500', display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-            <span style={{ fontSize: '1.2rem' }}>👤</span> Marlon (Autenticado JWT)
-          </span>
-          <button onClick={() => { localStorage.removeItem('token'); navigate('/login'); }} style={{ color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '0.9rem', padding: 0 }}>
-            Salir
-          </button>
+        <div className="hero-metric">
+          <span>Tasa seleccionada</span>
+          <strong>{selectedCredit.interes.toFixed(2)}%</strong>
         </div>
-      </header>
+      </section>
 
-      {/* Contenedor central del simulador */}
-      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 20px' }}></div>
-      <div style={{ backgroundColor: '#f0f7ff', borderBottom: '1px solid #bfdbfe', padding: '15px 30px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: '8px 8px 0 0' }}>
-        <button onClick={() => navigate('/dashboard')} style={{ color: '#1e3a8a', background: 'none', border: 'none', fontWeight: 'bold', cursor: 'pointer' }}>
-          ← Cambiar crédito
-        </button>
-        <div style={{ textAlign: 'right', display: 'flex', gap: '15px', alignItems: 'center' }}>
-          <span style={{ color: '#4b5563', fontSize: '0.9rem' }}>Simulando:</span>
-          <strong style={{ color: '#1e3a8a', fontSize: '1.1rem' }}>{creditoSeleccionado.nombre}</strong>
-          <span style={{ color: '#d1d5db' }}>|</span>
-          <span style={{ color: '#4b5563', fontSize: '0.9rem' }}>Tasa referencial:</span>
-          <strong style={{ color: '#d97706', fontSize: '1.2rem' }}>{creditoSeleccionado.interes}%</strong>
+      <section className="simulator-toolbar">
+        <Link to="/dashboard" className="text-link">
+          Cambiar desde creditos
+        </Link>
+        <div>
+          <span>{selectedCredit.nombre}</span>
+          <strong>{selectedCredit.rango}</strong>
         </div>
-      </div>
+      </section>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', backgroundColor: '#fff', borderRadius: '0 0 8px 8px', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
-        
-        <section style={{ padding: '40px', borderRight: '1px solid #f3f4f6' }}>
-          {error && <p style={{ color: '#dc2626', fontWeight: 'bold', marginBottom: '15px' }}>{error}</p>}
-          
-          <form onSubmit={manejarSimulacion}>
-            <div style={{ marginBottom: '25px' }}>
-              <label style={{ display: 'block', color: '#1f2937', fontWeight: '600', marginBottom: '8px' }}>
-                ¿Cuánto dinero necesitas que te prestemos?
-              </label>
-              <div style={{ position: 'relative' }}>
-                <span style={{ position: 'absolute', left: '15px', top: '12px', color: '#6b7280', fontWeight: 'bold' }}>$</span>
-                <input 
-                  type="number" 
-                  value={monto} 
-                  onChange={(e) => setMonto(e.target.value)}
-                  style={{ width: '100%', padding: '12px 12px 12px 35px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '1.1rem', fontWeight: 'bold', boxSizing: 'border-box' }}
-                />
-              </div>
-              <p style={{ fontSize: '0.8rem', color: '#9ca3af', marginTop: '5px' }}>Min. $300,00</p>
+      <section className="simulator-layout">
+        <form className="simulator-form" onSubmit={handleSimulation}>
+          <div className="form-group">
+            <label htmlFor="credit-type">Tipo de credito</label>
+            <select id="credit-type" value={selectedCreditId} onChange={(event) => setSelectedCreditId(event.target.value)}>
+              {CREDIT_OPTIONS.map((credit) => (
+                <option key={credit.id} value={credit.id}>
+                  {credit.nombre}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="amount">Cuanto dinero necesitas</label>
+            <div className="money-input">
+              <span>$</span>
+              <input
+                id="amount"
+                type="number"
+                min="300"
+                step="50"
+                value={amount}
+                onChange={(event) => setAmount(event.target.value)}
+              />
             </div>
+            <small>Minimo $300.00</small>
+          </div>
 
-            <div style={{ marginBottom: '30px' }}>
-              <label style={{ display: 'block', color: '#1f2937', fontWeight: '600', marginBottom: '8px' }}>
-                ¿En cuánto tiempo quieres pagarlo?
-              </label>
-              <select 
-                value={plazo} 
-                onChange={(e) => setPlazo(e.target.value)}
-                style={{ width: '100%', padding: '12px', borderRadius: '8px', border: '1px solid #d1d5db', fontSize: '1rem', backgroundColor: '#fff', boxSizing: 'border-box' }}
-              >
-                <option value="12">1 año (12 meses)</option>
-                <option value="24">2 años (24 meses)</option>
-                <option value="36">3 años (36 meses)</option>
-                <option value="48">4 años (48 meses)</option>
-                <option value="60">5 años (60 meses)</option>
-              </select>
-            </div>
+          <div className="form-group">
+            <label htmlFor="term">En cuanto tiempo quieres pagarlo</label>
+            <select id="term" value={term} onChange={(event) => setTerm(event.target.value)}>
+              <option value="12">12 meses</option>
+              <option value="24">24 meses</option>
+              <option value="36">36 meses</option>
+              <option value="48">48 meses</option>
+              <option value="60">60 meses</option>
+              <option value="72">72 meses</option>
+            </select>
+          </div>
 
-            <div style={{ marginBottom: '35px' }}>
-              <label style={{ display: 'block', color: '#1f2937', fontWeight: '600', marginBottom: '15px' }}>
-                ¿Cómo quieres pagar tus intereses?
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
-                <div 
-                  onClick={() => setMetodo('french')}
-                  style={{ padding: '20px', textAlign: 'center', borderRadius: '8px', cursor: 'pointer', border: metodo === 'french' ? '2px solid #1e3a8a' : '2px solid #e5e7eb', backgroundColor: metodo === 'french' ? '#eff6ff' : '#fff' }}
-                >
-                  <h4 style={{ margin: '0 0 5px 0', color: '#1f2937' }}>Método Francés</h4>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>Cuotas se mantienen fijas en el tiempo</p>
-                </div>
-                
-                <div 
-                  onClick={() => setMetodo('german')}
-                  style={{ padding: '20px', textAlign: 'center', borderRadius: '8px', cursor: 'pointer', border: metodo === 'german' ? '2px solid #1e3a8a' : '2px solid #e5e7eb', backgroundColor: metodo === 'german' ? '#eff6ff' : '#fff' }}
-                >
-                  <h4 style={{ margin: '0 0 5px 0', color: '#1f2937' }}>Método Alemán</h4>
-                  <p style={{ margin: 0, fontSize: '0.8rem', color: '#6b7280' }}>Cuotas variables que decrecen en el tiempo</p>
-                </div>
-              </div>
-            </div>
-
-            <button type="submit" disabled={cargando} style={{ width: '100%', padding: '15px', backgroundColor: '#fff', color: '#1e3a8a', border: '2px solid #1e3a8a', borderRadius: '8px', fontWeight: 'bold', cursor: cargando ? 'not-allowed' : 'pointer', fontSize: '1.1rem' }}>
-              {cargando ? 'Calculando...' : 'Simular'}
+          <fieldset className="method-group">
+            <legend>Metodo de amortizacion</legend>
+            <button
+              type="button"
+              className={method === 'french' ? 'method-card is-selected' : 'method-card'}
+              onClick={() => setMethod('french')}
+            >
+              <strong>Frances</strong>
+              <span>Cuota fija mensual</span>
             </button>
-          </form>
-        </section>
+            <button
+              type="button"
+              className={method === 'german' ? 'method-card is-selected' : 'method-card'}
+              onClick={() => setMethod('german')}
+            >
+              <strong>Aleman</strong>
+              <span>Capital fijo y cuotas decrecientes</span>
+            </button>
+          </fieldset>
 
-        <section style={{ backgroundColor: '#f9fafb', padding: '40px', display: 'flex', flexDirection: 'column' }}>
-          
-          {!resultados ? (
-             <div style={{ textAlign: 'center', color: '#9ca3af', marginTop: '80px' }}>
-               <p>Llena los datos y presiona "Simular" para ver tus cuotas.</p>
-             </div>
+          {error && <div className="alert alert-error">{error}</div>}
+          {notice && <div className="alert alert-success">{notice}</div>}
+
+          <button className="btn btn-primary btn-full" type="submit" disabled={isLoading}>
+            {isLoading ? 'Guardando...' : 'Simular'}
+          </button>
+        </form>
+
+        <aside className="result-panel">
+          {!result ? (
+            <div className="empty-state">
+              <span>Resultado</span>
+              <h2>Completa los datos para ver tu cuota.</h2>
+              <p>El calculo se muestra aqui sin necesidad de iniciar sesion.</p>
+            </div>
           ) : (
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-              <h3 style={{ textAlign: 'center', color: '#374151', marginBottom: '20px' }}>
-                {metodo === 'german' ? 'Tu primera cuota será' : 'Tus pagos mensuales serán'}
-              </h3>
-              
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '15px', color: '#6b7280', fontSize: '0.9rem', marginBottom: '20px' }}>
-                 <div style={{ textAlign: 'center' }}><strong style={{ color: '#1f2937', display: 'block' }}>${resultados.capitalMes.toFixed(2)}</strong>Capital</div>
-                 <div>+</div>
-                 <div style={{ textAlign: 'center' }}><strong style={{ color: '#1f2937', display: 'block' }}>${resultados.interesMes.toFixed(2)}</strong>Interés</div>
-                 <div>+</div>
-                 <div style={{ textAlign: 'center' }}><strong style={{ color: '#1f2937', display: 'block' }}>${resultados.seguroMes.toFixed(2)}</strong>Seguro</div>
+            <div className="result-content">
+              <span className="eyebrow">{formatMethod(method)}</span>
+              <h2>{method === 'german' ? 'Tu primera cuota sera' : 'Tu cuota mensual sera'}</h2>
+              <strong className="payment-value">{formatMoney(result.firstPayment)}</strong>
+
+              <div className="payment-breakdown">
+                <div>
+                  <span>Capital</span>
+                  <strong>{formatMoney(result.firstPrincipal)}</strong>
+                </div>
+                <div>
+                  <span>Interes</span>
+                  <strong>{formatMoney(result.firstInterest)}</strong>
+                </div>
+                <div>
+                  <span>Seguro</span>
+                  <strong>{formatMoney(result.insuranceMonthly)}</strong>
+                </div>
               </div>
 
-              <div style={{ textAlign: 'center', marginBottom: '30px' }}>
-                <p style={{ fontSize: '3rem', fontWeight: 'bold', color: '#1e3a8a', margin: '0 0 5px 0' }}>${resultados.cuotaMensual.toFixed(2)}</p>
-                <p style={{ color: '#6b7280', margin: 0 }}>Durante <strong style={{ color: '#1f2937' }}>{resultados.plazoMeses} meses</strong></p>
-              </div>
+              <dl className="summary-list">
+                <div>
+                  <dt>Capital solicitado</dt>
+                  <dd>{formatMoney(result.amount)}</dd>
+                </div>
+                <div>
+                  <dt>Total de interes</dt>
+                  <dd>{formatMoney(result.totalInterest)}</dd>
+                </div>
+                <div>
+                  <dt>Total seguro</dt>
+                  <dd>{formatMoney(result.totalInsurance)}</dd>
+                </div>
+                <div>
+                  <dt>Total a pagar</dt>
+                  <dd>{formatMoney(result.totalPayment)}</dd>
+                </div>
+              </dl>
 
-              <div style={{ borderTop: '1px solid #e5e7eb', borderBottom: '1px solid #e5e7eb', padding: '20px 0', margin: '20px 0' }}>
-                <h4 style={{ textAlign: 'center', color: '#374151', marginBottom: '20px' }}>Detalle de tu crédito</h4>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}><span style={{ color: '#6b7280' }}>Capital:</span><strong>${resultados.capitalTotal.toFixed(2)}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '10px' }}><span style={{ color: '#6b7280' }}>Total de interés:</span><strong>${resultados.interesTotal.toFixed(2)}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '15px' }}><span style={{ color: '#6b7280' }}>Total seguro:</span><strong>${resultados.seguroTotal.toFixed(2)}</strong></div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.2rem' }}><strong>Total a pagar:</strong><strong style={{ color: '#1e3a8a' }}>${(resultados.capitalTotal + resultados.interesTotal + resultados.seguroTotal).toFixed(2)}</strong></div>
-              </div>
-
-              <div style={{ marginTop: 'auto' }}>
-                <button onClick={descargarPDF} style={{ width: '100%', padding: '15px', backgroundColor: '#dc2626', color: 'white', border: 'none', borderRadius: '8px', fontWeight: 'bold', cursor: 'pointer', fontSize: '1rem', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)' }}>
+              {isAuthenticated ? (
+                <button className="btn btn-danger btn-full" type="button" onClick={downloadPdf}>
                   Exportar a PDF
                 </button>
-              </div>
+              ) : (
+                <div className="login-required">
+                  Inicia sesion para guardar y exportar tu simulacion.
+                </div>
+              )}
             </div>
           )}
-        </section>
-      </div>
+        </aside>
+      </section>
     </main>
   );
+}
+
+function buildSimulationResult(amount: number, annualRate: number, termMonths: number, method: 'french' | 'german'): SimulationResult {
+  const schedule = calculateSchedule(amount, annualRate, termMonths, method);
+  const firstRow = schedule[0];
+  const totalInterest = roundMoney(schedule.reduce((sum, row) => sum + row.interest, 0));
+  const totalInsurance = roundMoney(INSURANCE_MONTHLY * termMonths);
+  const totalPayment = roundMoney(amount + totalInterest + totalInsurance);
+
+  return {
+    firstPayment: roundMoney(firstRow.payment + INSURANCE_MONTHLY),
+    firstPrincipal: firstRow.principal,
+    firstInterest: firstRow.interest,
+    insuranceMonthly: INSURANCE_MONTHLY,
+    amount,
+    totalInterest,
+    totalInsurance,
+    totalPayment,
+    termMonths,
+    schedule,
+  };
+}
+
+function calculateSchedule(amount: number, annualRate: number, termMonths: number, method: 'french' | 'german'): PdfInstallment[] {
+  const monthlyRate = annualRate / 100 / 12;
+  let balance = amount;
+  const schedule: PdfInstallment[] = [];
+
+  if (method === 'french') {
+    const payment = monthlyRate === 0
+      ? amount / termMonths
+      : (amount * monthlyRate) / (1 - (1 + monthlyRate) ** -termMonths);
+
+    for (let period = 1; period <= termMonths; period += 1) {
+      const interest = balance * monthlyRate;
+      const principal = period === termMonths ? balance : payment - interest;
+      const actualPayment = principal + interest;
+      balance -= principal;
+      schedule.push(toInstallment(period, actualPayment, principal, interest, balance));
+    }
+  } else {
+    const fixedPrincipal = amount / termMonths;
+
+    for (let period = 1; period <= termMonths; period += 1) {
+      const interest = balance * monthlyRate;
+      const principal = period === termMonths ? balance : fixedPrincipal;
+      const payment = principal + interest;
+      balance -= principal;
+      schedule.push(toInstallment(period, payment, principal, interest, balance));
+    }
+  }
+
+  return schedule;
+}
+
+function toInstallment(period: number, payment: number, principal: number, interest: number, balance: number): PdfInstallment {
+  return {
+    period,
+    payment: roundMoney(payment),
+    principal: roundMoney(principal),
+    interest: roundMoney(interest),
+    balance: roundMoney(Math.max(balance, 0)),
+  };
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function isCreditDto(body: unknown): body is CreditDto {
+  return Boolean(body && typeof body === 'object' && 'id' in body && typeof (body as { id?: unknown }).id === 'string');
+}
+
+function isSimulationDto(body: unknown): body is SimulationDto {
+  return Boolean(body && typeof body === 'object' && 'id' in body && Array.isArray((body as { schedule?: unknown }).schedule));
 }
