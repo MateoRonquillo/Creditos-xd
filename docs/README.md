@@ -1,5 +1,7 @@
 # Documentacion de la API
 
+Para entender la arquitectura completa, el funcionamiento interno y la conexion entre frontend, microservicios y bases de datos, consulta la [guia de arquitectura](architecture.md).
+
 La API se consume normalmente a traves del gateway:
 
 ```text

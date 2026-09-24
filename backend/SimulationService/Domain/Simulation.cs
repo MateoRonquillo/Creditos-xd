@@ -11,7 +11,7 @@ public sealed class Simulation
     public required string AmortizationType { get; init; }
     public required decimal TotalInterest { get; init; }
     public required decimal TotalPayment { get; init; }
-    public required IReadOnlyCollection<AmortizationInstallment> Schedule { get; init; }
+    public required IReadOnlyCollection<AmortizationInstallment> Schedule { get; set; }
     public DateTime CreatedAtUtc { get; init; } = DateTime.UtcNow;
 }
 

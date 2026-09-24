@@ -1,7 +1,7 @@
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
-builder.Services.AddSingleton<AuthService.Infrastructure.IUserRepository, AuthService.Infrastructure.InMemoryUserRepository>();
+builder.Services.AddSingleton<AuthService.Infrastructure.IUserRepository, AuthService.Infrastructure.SqlUserRepository>();
 builder.Services.AddSingleton<AuthService.Application.PasswordHasher>();
 builder.Services.AddSingleton<AuthService.Application.TokenService>();
 builder.Services.AddScoped<AuthService.Application.AuthApplicationService>();

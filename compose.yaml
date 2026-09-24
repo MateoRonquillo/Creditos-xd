@@ -65,6 +65,8 @@ services:
     depends_on:
       sqlserver:
         condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
     networks:
       - backend
       - data
@@ -80,6 +82,8 @@ services:
     depends_on:
       sqlserver:
         condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
     networks:
       - backend
       - data
@@ -96,6 +100,8 @@ services:
     depends_on:
       sqlserver:
         condition: service_healthy
+      database-init:
+        condition: service_completed_successfully
       credit-service:
         condition: service_started
     networks:
@@ -138,9 +144,53 @@ services:
     networks:
       - data
 
+  database-init:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    restart: "no"
+    user: root
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: ${SQL_SA_PASSWORD:-CreditoLocal_2026!}
+    entrypoint:
+      - /opt/mssql-tools18/bin/sqlcmd
+    command:
+      - -S
+      - sqlserver,1433
+      - -U
+      - sa
+      - -P
+      - ${SQL_SA_PASSWORD:-CreditoLocal_2026!}
+      - -C
+      - -b
+      - -i
+      - /schema.sql
+    volumes:
+      - ./database/schema.sql:/schema.sql:ro,Z
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - data
+
+  db-admin:
+    image: dbeaver/cloudbeaver:latest
+    restart: unless-stopped
+    ports:
+      - "${DB_ADMIN_PORT:-8978}:8978"
+    volumes:
+      - cloudbeaver-data:/opt/cloudbeaver/workspace
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+    networks:
+      - edge
+      - data
+
 volumes:
   sqlserver-data:
     name: simulador-creditos-sqlserver-data
+  cloudbeaver-data:
+    name: simulador-creditos-cloudbeaver-data
 
 networks:
   edge:

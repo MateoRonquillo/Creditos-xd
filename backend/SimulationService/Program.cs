@@ -2,7 +2,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
-builder.Services.AddSingleton<SimulationService.Infrastructure.ISimulationRepository, SimulationService.Infrastructure.InMemorySimulationRepository>();
+builder.Services.AddSingleton<SimulationService.Infrastructure.ISimulationRepository, SimulationService.Infrastructure.SqlSimulationRepository>();
 builder.Services.AddSingleton<SimulationService.Infrastructure.TokenUserContext>();
 builder.Services.AddSingleton<SimulationService.Strategies.FrenchAmortizationStrategy>();
 builder.Services.AddSingleton<SimulationService.Strategies.GermanAmortizationStrategy>();
